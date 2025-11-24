@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { memo } from 'react';
+import { useGame } from '../context/GameContext';
+import { Cpu, Zap, HardDrive, Activity } from 'lucide-react';
 import { CPU } from '../types/GameTypes';
 interface CPUPanelProps {
   cpu: CPU;

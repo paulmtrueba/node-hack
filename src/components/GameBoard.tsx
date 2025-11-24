@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useGame } from '../context/GameContext';
 import { Coordinate, coordToKey, Program } from '../types/GameTypes';
@@ -19,8 +19,75 @@ export function GameBoard() {
     selectedProgram
   } = gameState;
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
-  const cellSize = 80;
-  const gap = 36;
+  const [isMobile, setIsMobile] = useState(false);
+  const [availableHeight, setAvailableHeight] = useState(0);
+  const [availableWidth, setAvailableWidth] = useState(0);
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    const updateAvailableDimensions = () => {
+      const viewportHeight = window.innerHeight;
+      const viewportWidth = window.innerWidth;
+      const isMobileView = viewportWidth < 768;
+      // Calculate available height
+      if (isMobileView) {
+        // Mobile: header (64px) + CPU panels (~120px) + controls (~150px) + padding
+        const reservedSpace = 64 + 120 + 150 + 80;
+        setAvailableHeight(Math.max(viewportHeight - reservedSpace, 300));
+      } else {
+        // Desktop: header (72px) + controls (~150px) + padding
+        const reservedSpace = 72 + 150 + 120;
+        setAvailableHeight(Math.max(viewportHeight - reservedSpace, 400));
+      }
+      // Calculate available width
+      if (isMobileView) {
+        // Mobile: use most of viewport width with padding, accounting for borders
+        setAvailableWidth(Math.max(viewportWidth - 32, 300));
+      } else {
+        // Desktop: calculate based on sidebar width (320px + gap + padding)
+        const reservedWidth = 320 + 48 + 48; // sidebar + gap + padding
+        setAvailableWidth(Math.max(viewportWidth - reservedWidth - 32, 400));
+      }
+    };
+    checkMobile();
+    updateAvailableDimensions();
+    window.addEventListener('resize', checkMobile);
+    window.addEventListener('resize', updateAvailableDimensions);
+    return () => {
+      window.removeEventListener('resize', checkMobile);
+      window.removeEventListener('resize', updateAvailableDimensions);
+    };
+  }, []);
+  // Calculate responsive cell sizing based on available dimensions
+  const calculateCellSize = () => {
+    if (availableHeight === 0 || availableWidth === 0) {
+      return {
+        cellSize: 80,
+        gap: 36
+      };
+    }
+    const gapRatio = 0.45; // Gap is 45% of cell size
+    const borderBuffer = 16; // Extra space for node borders (ring-2 = 2px * 2 sides + some breathing room)
+    // Calculate based on height
+    const cellSizeFromHeight = availableHeight / (gridSize + gapRatio * (gridSize - 1));
+    // Calculate based on width (accounting for border buffer)
+    const cellSizeFromWidth = (availableWidth - borderBuffer) / (gridSize + gapRatio * (gridSize - 1));
+    // Use the smaller of the two to ensure it fits both dimensions
+    const cellSize = Math.min(cellSizeFromHeight, cellSizeFromWidth);
+    const gap = cellSize * gapRatio;
+    // Set reasonable min/max bounds
+    const boundedCellSize = Math.max(40, Math.min(cellSize, isMobile ? 80 : 100));
+    const boundedGap = boundedCellSize * gapRatio;
+    return {
+      cellSize: Math.floor(boundedCellSize),
+      gap: Math.floor(boundedGap)
+    };
+  };
+  const {
+    cellSize,
+    gap
+  } = calculateCellSize();
   const totalSize = gridSize * cellSize + (gridSize - 1) * gap;
   const getNodeColor = (owner: string) => {
     if (owner === 'playerA') return 'from-cyan-500 to-blue-600';
@@ -38,47 +105,39 @@ export function GameBoard() {
   const isCPUNode = (row: number, col: number) => {
     return row === 0 && col === 0 || row === gridSize - 1 && col === gridSize - 1;
   };
-  // Check if a node is highlighted for connection creation
   const isConnectionHighlighted = (position: Coordinate) => {
     if (mode !== 'create_connection' || !connectionStart) return false;
     return coordToKey(position) === coordToKey(connectionStart);
   };
-  // Get all connections that can be destroyed from the selected program's position
   const getDestroyableConnections = () => {
     if (mode !== 'destroy_connection' || !selectedProgram) return [];
     const program = gameState.programs.get(selectedProgram);
     if (!program || program.type !== 'offensive') return [];
     const programPos = program.position;
-    // Find all connections adjacent to the program's position
     return connections.filter(conn => {
       const adjacentToFrom = Math.abs(programPos[0] - conn.from[0]) + Math.abs(programPos[1] - conn.from[1]) === 1;
       const adjacentToTo = Math.abs(programPos[0] - conn.to[0]) + Math.abs(programPos[1] - conn.to[1]) === 1;
       return adjacentToFrom || adjacentToTo;
     });
   };
-  // Get connections that would be destroyed if clicking a specific node
   const getConnectionsToNode = (nodePos: Coordinate) => {
     if (mode !== 'destroy_connection' || !selectedProgram) return [];
     const program = gameState.programs.get(selectedProgram);
     if (!program || program.type !== 'offensive') return [];
     const programPos = program.position;
     const destroyableConns = getDestroyableConnections();
-    // Find connections that connect program's node to the target node
     return destroyableConns.filter(conn => {
       const connectsToProgramAndNode = coordToKey(conn.from) === coordToKey(programPos) && coordToKey(conn.to) === coordToKey(nodePos) || coordToKey(conn.to) === coordToKey(programPos) && coordToKey(conn.from) === coordToKey(nodePos);
       return connectsToProgramAndNode;
     });
   };
-  // Check if a node is a valid destroy target
   const isNodeDestroyTarget = (position: Coordinate) => {
     return getConnectionsToNode(position).length > 0;
   };
-  // Handle node click in destroy mode
   const handleNodeClickInDestroyMode = (position: Coordinate) => {
     if (mode !== 'destroy_connection' || !selectedProgram) return;
     const connectionsToDestroy = getConnectionsToNode(position);
     if (connectionsToDestroy.length > 0) {
-      // Destroy the first connection (there should only be one direct connection)
       destroyConnection(selectedProgram, connectionsToDestroy[0]);
     }
   };
@@ -96,33 +155,30 @@ export function GameBoard() {
       const isDestroyable = destroyableConns.some(c => coordToKey(c.from) === coordToKey(conn.from) && coordToKey(c.to) === coordToKey(conn.to));
       const isHovered = hoveredConnections.some(c => coordToKey(c.from) === coordToKey(conn.from) && coordToKey(c.to) === coordToKey(conn.to));
       const isDestroyMode = mode === 'destroy_connection';
-      // Determine connection color and style
-      let strokeColor = '#00ff00'; // Default green
-      let strokeWidth = 3;
+      // Responsive stroke width
+      const baseStrokeWidth = Math.max(2, Math.floor(cellSize / 30));
+      let strokeColor = '#00ff00';
+      let strokeWidth = baseStrokeWidth;
       let opacity = 0.6;
       let glowColor = '#00ff00';
       if (isDestroyMode) {
         if (isDestroyable) {
           if (isHovered) {
-            // Hovered destroyable connection - bright red with pulse
             strokeColor = '#ff0000';
-            strokeWidth = 5;
+            strokeWidth = baseStrokeWidth + 2;
             opacity = 1;
             glowColor = '#ff0000';
           } else {
-            // Destroyable but not hovered - red
             strokeColor = '#ff3333';
-            strokeWidth = 4;
+            strokeWidth = baseStrokeWidth + 1;
             opacity = 0.8;
             glowColor = '#ff0000';
           }
         } else {
-          // Not destroyable in destroy mode - dimmed
           opacity = 0.3;
         }
       }
       return <g key={idx}>
-          {/* Visible connection line */}
           <motion.line x1={x1} y1={y1} x2={x2} y2={y2} stroke={strokeColor} strokeWidth={strokeWidth} initial={{
           pathLength: 0,
           opacity: 0
@@ -140,12 +196,11 @@ export function GameBoard() {
             duration: 0.2
           }
         }} style={{
-          filter: `drop-shadow(0 0 ${isHovered ? 12 : isDestroyable ? 8 : 4}px ${glowColor})`,
+          filter: `drop-shadow(0 0 ${isHovered ? 8 : isDestroyable ? 6 : 4}px ${glowColor})`,
           pointerEvents: 'none'
         }} />
 
-          {/* Pulsing glow effect on hover */}
-          {isHovered && isDestroyable && <motion.line x1={x1} y1={y1} x2={x2} y2={y2} stroke={strokeColor} strokeWidth={strokeWidth + 4} opacity={0.3} initial={{
+          {isHovered && isDestroyable && !isMobile && <motion.line x1={x1} y1={y1} x2={x2} y2={y2} stroke={strokeColor} strokeWidth={strokeWidth + 3} opacity={0.3} initial={{
           opacity: 0.3
         }} animate={{
           opacity: [0.3, 0.6, 0.3]
@@ -154,23 +209,26 @@ export function GameBoard() {
           repeat: Infinity,
           ease: 'easeInOut'
         }} style={{
-          filter: 'blur(4px)',
+          filter: 'blur(3px)',
           pointerEvents: 'none'
         }} />}
         </g>;
     });
   };
-  // Helper to convert key back to coordinate
   const keyToCoord = (key: string): Coordinate => {
     const [row, col] = key.split(',').map(Number);
     return [row, col];
   };
-  return <div className="flex items-center justify-center w-full">
+  // Responsive icon and text sizes
+  const cpuIconSize = Math.max(20, Math.floor(cellSize / 3));
+  const programIconSize = Math.max(24, Math.floor(cellSize / 2.5));
+  const badgeSize = Math.max(20, Math.floor(cellSize / 4));
+  const fontSize = Math.max(8, Math.floor(cellSize / 10));
+  return <div className="flex items-center justify-center w-full px-2">
       <div className="relative" style={{
       width: totalSize,
       height: totalSize
     }}>
-        {/* Connection layer */}
         <svg className="absolute inset-0" style={{
         width: totalSize,
         height: totalSize
@@ -178,7 +236,6 @@ export function GameBoard() {
           {renderConnections()}
         </svg>
 
-        {/* Nodes grid */}
         <div className="grid relative" style={{
         gridTemplateColumns: `repeat(${gridSize}, ${cellSize}px)`,
         gap: `${gap}px`,
@@ -206,7 +263,7 @@ export function GameBoard() {
             opacity: 1
           }} transition={{
             delay: index * 0.02
-          }} onMouseEnter={() => isDestroyTarget && setHoveredNode(nodeKey)} onMouseLeave={() => setHoveredNode(null)} onClick={() => {
+          }} onMouseEnter={() => !isMobile && isDestroyTarget && setHoveredNode(nodeKey)} onMouseLeave={() => setHoveredNode(null)} onTouchStart={() => isDestroyTarget && setHoveredNode(nodeKey)} onTouchEnd={() => setHoveredNode(null)} onClick={() => {
             if (mode === 'destroy_connection' && isDestroyTarget) {
               handleNodeClickInDestroyMode(position);
             } else {
@@ -214,8 +271,7 @@ export function GameBoard() {
             }
           }} className={`
                   relative rounded-lg flex items-center justify-center
-                  ${isCPU ? 'cursor-default' : isDestroyTarget ? 'cursor-pointer' : 'cursor-pointer'}
-                  transition-all
+                  cursor-pointer transition-all
                   bg-gradient-to-br ${getNodeColor(node?.owner || 'neutral')}
                   ${isCPU ? 'ring-4 ring-[#00ff00] shadow-[0_0_20px_#00ff00]' : 'ring-2 ring-[#00ff00] shadow-[0_0_10px_#00ff0040]'}
                   ${!isCPU && !isDestroyTarget && 'hover:ring-[#00ff00] hover:shadow-[0_0_15px_#00ff00] active:scale-95'}
@@ -227,9 +283,12 @@ export function GameBoard() {
             height: cellSize
           }}>
                 {isCPU && <>
-                    <div className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs font-bold text-[#00ff00] 
+                    <div className="absolute left-1/2 -translate-x-1/2 font-bold text-[#00ff00] 
                                 bg-black/80 px-2 py-1 rounded border border-[#00ff00] whitespace-nowrap
-                                shadow-[0_0_10px_#00ff00]">
+                                shadow-[0_0_10px_#00ff00]" style={{
+                top: `-${Math.floor(cellSize / 3)}px`,
+                fontSize: `${fontSize}px`
+              }}>
                       {cpuLabel}
                     </div>
 
@@ -244,7 +303,7 @@ export function GameBoard() {
               }} className="text-[#00ff00]" style={{
                 filter: 'drop-shadow(0 0 8px #00ff00)'
               }}>
-                      <Cpu size={40} strokeWidth={2} />
+                      <Cpu size={cpuIconSize} strokeWidth={2} />
                     </motion.div>
                   </>}
 
@@ -258,25 +317,30 @@ export function GameBoard() {
               e.stopPropagation();
               handleProgramClick(program.id);
             }} className={`
-                      text-4xl cursor-pointer transition-transform 
+                      cursor-pointer transition-transform 
                       hover:scale-110 active:scale-90
                       ${selectedProgram === program.id ? 'ring-4 ring-white rounded-full shadow-[0_0_20px_white]' : ''}
                     `} style={{
+              fontSize: `${programIconSize}px`,
               filter: selectedProgram === program.id ? 'drop-shadow(0 0 8px white)' : 'none'
             }}>
                     {getProgramIcon(program)}
                   </motion.div>}
 
-                <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[10px] text-[#00ff00] 
-                            bg-black/60 px-1 rounded font-mono">
+                <div className="absolute left-1/2 -translate-x-1/2 text-[#00ff00] 
+                            bg-black/60 px-1 rounded font-mono" style={{
+              bottom: `-${Math.floor(cellSize / 4)}px`,
+              fontSize: `${Math.max(7, fontSize - 2)}px`
+            }}>
                   [{row},{col}]
                 </div>
 
-                {isHighlighted && <div className="absolute top-1 right-1 text-xs bg-yellow-400 text-black px-1 rounded font-mono font-bold">
+                {isHighlighted && <div className="absolute top-1 right-1 bg-yellow-400 text-black px-1 rounded font-mono font-bold" style={{
+              fontSize: `${Math.max(8, fontSize)}px`
+            }}>
                     START
                   </div>}
 
-                {/* Destroy indicator on target nodes */}
                 {isDestroyTarget && <motion.div initial={{
               opacity: 0,
               scale: 0
@@ -290,12 +354,16 @@ export function GameBoard() {
                 duration: 0.5,
                 repeat: hoveredNode === nodeKey ? Infinity : 0
               }} className={`
-                        w-6 h-6 rounded-full flex items-center justify-center
+                        rounded-full flex items-center justify-center
                         ${hoveredNode === nodeKey ? 'bg-red-500' : 'bg-red-400'}
                         border-2 border-white
                         shadow-[0_0_8px_#ff0000]
-                      `}>
-                      <span className="text-white text-xs font-bold">✕</span>
+                      `} style={{
+                width: `${badgeSize}px`,
+                height: `${badgeSize}px`,
+                fontSize: `${Math.max(10, fontSize)}px`
+              }}>
+                      <span className="text-white font-bold">✕</span>
                     </motion.div>
                   </motion.div>}
               </motion.div>;

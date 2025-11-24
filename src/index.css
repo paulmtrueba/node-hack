@@ -6,6 +6,19 @@
 @import 'tailwindcss/utilities';
 /* DO NOT DELETE THESE TAILWIND IMPORTS, OTHERWISE THE STYLING WILL NOT RENDER AT ALL - DO NOT DELETE THIS COMMENT */
 
+/* Mobile optimizations */
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
 /* Custom scrollbar for game log */
 @layer utilities {
   .overflow-y-auto::-webkit-scrollbar {
@@ -24,6 +37,58 @@
   
   .overflow-y-auto::-webkit-scrollbar-thumb:hover {
     background: #6b7280;
+  }
+}
+
+/* Optimize animations for mobile */
+@media (max-width: 768px) {
+  * {
+    animation-duration: 0.3s !important;
+  }
+  
+  /* Optimize transforms */
+  [style*="transform"] {
+    will-change: transform;
+  }
+}
+
+/* Performance optimizations */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Touch-friendly tap targets */
+@media (max-width: 768px) {
+  button,
+  a,
+  [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Prevent text selection on game elements */
+.game-board,
+.game-board * {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+}
+
+/* Optimize SVG rendering */
+svg {
+  shape-rendering: geometricPrecision;
+}
+
+@media (max-width: 768px) {
+  svg {
+    shape-rendering: optimizeSpeed;
   }
 }
 
